@@ -1,38 +1,70 @@
+
 <?php
 
-// Подключение к базе данных
-$pdo = new PDO('mysql:host=localhost;dbname=flight_pool;charset=utf8', 'root', null, [ PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+// Подключаемся к базе данных
+$pdo = new PDO('mysql:host=localhost;dbname=flight_pool;charset=utf8', 'root', null, [
+    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+]);
 
-// Получаем токен из заголовков запроса
+// Получаем данные из заголовков и тела запроса
 $headers = getallheaders();
 $token = isset($headers['Authorization']) ? $headers['Authorization'] : null;
+$formData = json_decode(file_get_contents("php://input"), true);
+$newPassword = isset($formData['password']) ? $formData['password'] : null;
 
-// Переменная для хранения информации о пользователе
-$user = [];
-
-// Проверяем наличие токена
-if ($token) {
-    // Выполняем запрос в базу данных, чтобы найти пользователя по api_token
-    $stmt = $pdo->prepare('SELECT first_name, last_name, phone, document_number FROM users WHERE api_token = :token');
-    $stmt->execute(['token' => $token]);
-    $user = $stmt->fetch();
-}
-
-// Если пользователь найден, возвращаем его данные
-if (!empty($user)) {
-    http_response_code(200);
-    header('Content-Type: application/json');
-    echo json_encode($user);
-} else {
-    // Если api_token не найден или пользователь не существует, возвращаем ошибку 401
+// Проверка: передан ли токен
+if (!$token) {
     http_response_code(401);
-    header('Content-Type: application/json');
     echo json_encode([
         "error" => [
             "code" => 401,
-            "message" => "Unauthorized"
+            "message" => "Unauthorized - Token not provided"
         ]
     ]);
+    exit;
 }
+
+// Проверка: передан ли новый пароль
+if (!$newPassword) {
+    http_response_code(422);
+    echo json_encode([
+        "error" => [
+            "code" => 422,
+            "message" => "Validation error",
+            "errors" => ["password" => "Password field is required"]
+        ]
+    ]);
+    exit;
+}
+
+// Находим пользователя по токену
+$stmt = $pdo->prepare('SELECT id FROM users WHERE api_token = :token');
+$stmt->execute(['token' => $token]);
+$user = $stmt->fetch();
+
+// Проверка: существует ли пользователь с таким токеном
+if (!$user) {
+    http_response_code(404);
+    echo json_encode([
+        "error" => [
+            "code" => 404,
+            "message" => "User not found"
+        ]
+    ]);
+    exit;
+}
+
+// Обновляем пароль пользователя
+$stmt = $pdo->prepare('UPDATE users SET password = :password WHERE id = :id');
+$stmt->execute([
+    'password' => $newPassword,
+    'id' => $user['id']
+]);
+
+// Возвращаем статус успешного выполнения
+http_response_code(200);
+echo json_encode([
+    "message" => "Password updated successfully"
+]);
 
 ?>
